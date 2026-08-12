@@ -226,6 +226,21 @@ footer{max-width:980px;margin:24px auto 0;padding:14px 18px;font-size:.85rem;col
         <span class="f" style="color:var(--ink2)">（天亮晨钟、日入暮鼓为晨钟暮鼓之本，不设开关）</span>
       </div>
       <div class="row" style="margin-bottom:8px;padding:8px 10px;border:1px dashed var(--line2);border-radius:8px;background:#f4ecd9">
+        <span class="f" style="color:var(--red)">声音测试：</span>
+        <label class="f">倍速
+          <select id="tSpeed">
+            <option value="60">60 倍（一天约 24 分钟）</option>
+            <option value="300" selected>300 倍（一天约 5 分钟）</option>
+            <option value="600">600 倍（一天约 2 分半）</option>
+          </select>
+        </label>
+        <button class="btn" id="btnTestStart">▶ 开始模拟测试</button>
+        <button class="btn ghost" id="btnTestStop" disabled>停止</button>
+        <span class="f" id="tStatus" style="color:var(--red)"></span>
+        <span class="f" style="color:var(--ink2)">以所选倍速从当前时刻快进模拟未来 24 小时：各报时按模拟时刻照常奏响并记入「今日报时记录」（带模拟时刻），
+        可据此核对声音是否按点响；高倍速下长序列可能重叠，以记录为准。测试结束或手动停止后自动恢复正常计时。</span>
+      </div>
+      <div class="row" style="margin-bottom:8px;padding:8px 10px;border:1px dashed var(--line2);border-radius:8px;background:#f4ecd9">
         <span class="f" style="color:var(--red)">配置备份：</span>
         <button class="btn" id="btnExport">导出配置</button>
         <button class="btn ghost" id="btnImport">导入配置</button>
@@ -247,7 +262,9 @@ footer{max-width:980px;margin:24px auto 0;padding:14px 18px;font-size:.85rem;col
     更内点钟四记，闻声知更知点。日出敲钟、日中敲钟、日落击鼓；交五更时，诸寺院行者打铁牌子或木鱼循门报晓
     （《东京梦华录·天晓诸人入市》）。<br>
     前台按地区日出日落自动排定钟鼓梆声，可试听诸声；声音的替换与增删、报时序列与时刻的安排均在「⚙ 后台管理」
-    （初始密码 1112，登录后可修改）。
+    （初始密码 1112，登录后可修改）。<br>
+    页面保持开启即可连日报时：换日点设在次日天亮后约 5 分钟（远早于日出晨钟，而非午夜零点），
+    前一夜的四更五更、次日的报晓与晨钟均不会漏报；已过的时刻仍显示为「已完成」，不需刷新页面。
   </footer>
 </div>
 
@@ -642,7 +659,7 @@ var DEFAULT_PASS='1112'; // 系统默认管理密码
 var state={ lat:36.67, lng:117, auto:true, masterVol:1,
             perVol:{clapper:1},
             overrides:{
-              dawn:[{id:'bell',count:1,interval:2200}], // 日出晨钟：天亮鸡鸣已由自定义「天亮」报时承担
+              dawn:[{id:'bell',count:1,interval:2200}], // 日出晨钟：天亮鸡鸣由默认自定义「天亮」报时承担
               market:[{id:'drum',count:1,interval:800}],
               sunset:[{id:'drum',count:1,interval:900}],
               geng1:[{id:'clapper',count:1,interval:8000}],
@@ -719,7 +736,7 @@ async function clearReplacement(id){
  * 五、报时时刻排定
  * ===================================================================*/
 function atTime(h,m,dayOffset){
-  var d=new Date(); d.setHours(h,m,0,0);
+  var d=simNow(); d.setHours(h,m,0,0);
   if(dayOffset) d.setDate(d.getDate()+dayOffset);
   return d;
 }
@@ -734,12 +751,13 @@ function defaultSeq(evId){
   return [{id:state.gengSound,count:n,interval:900}]; // 更击鼓为节，闻更数
 }
 function getSeq(evId){
+  var base=evId.replace(/_next$/,''); // 次日报时条目（baoxiao_next 等）沿用当日同一序列
   if(state.customEvents){
     for(var i=0;i<state.customEvents.length;i++){
-      if(state.customEvents[i].id===evId) return state.customEvents[i].seq||[];
+      if(state.customEvents[i].id===base) return state.customEvents[i].seq||[];
     }
   }
-  return state.overrides[evId] || defaultSeq(evId);
+  return state.overrides[base] || defaultSeq(base);
 }
 function findCustom(id){
   if(!state.customEvents) return null;
@@ -751,14 +769,14 @@ function seqLabel(seq){
   return seq.map(function(s){ return soundName(s.id)+'×'+s.count; }).join(' → ');
 }
 function computeEvents(){
-  var now=new Date(), sun;
+  var now=simNow(), sun;
   try{ sun=SunCalc.getTimes(now,state.lat,state.lng); }
   catch(e){ sun=null; }
   if(!sun||!isFinite(sun.sunrise.getTime())){
     // 极端情况兜底：按卯正日出、酉正日入
     sun={ dawn:atTime(5,0,0), sunrise:atTime(6,0,0), sunset:atTime(18,0,0), dusk:atTime(19,0,0), solarNoon:atTime(12,0,0) };
   }
-  state.sun=sun;
+  state.sun=sun; state.sun2=sun2;
   var evs=[];
   /* —— 白昼报时：日出敲钟、正午敲钟、日落击鼓 —— */
   if(state.evEn.baoxiao!==false) evs.push({id:'baoxiao', time:new Date(sun.dawn.getTime()-40*60000),
@@ -772,11 +790,21 @@ function computeEvents(){
   /* —— 夜 · 五更：天黑起更，天亮止更；每更分五段，更首鼓/梆一声，更内点钟四记 —— */
   var tomorrow=new Date(now.getTime()+86400000), sun2=null;
   try{ sun2=SunCalc.getTimes(tomorrow,state.lat,state.lng); }catch(e){ sun2=null; }
-  var nightEnd=(sun2&&isFinite(sun2.dawn.getTime()))?sun2.dawn:new Date(sun.dusk.getTime()+12*3600000);
-  var L=nightEnd-sun.dusk; // 夜长：天黑 → 次日天亮
+  /* 天亮前开启页面：当前之夜始于昨日天黑、止于今日天亮（昨昏 → 今晨天亮），
+     否则为今日天黑 → 明日天亮 */
+  var nightStart=sun.dusk, nightEnd=null;
+  if(now.getTime()<sun.dawn.getTime()){
+    var sun0=null;
+    try{ sun0=SunCalc.getTimes(new Date(now.getTime()-86400000),state.lat,state.lng); }catch(e){}
+    if(sun0&&isFinite(sun0.dusk.getTime())) nightStart=sun0.dusk;
+    nightEnd=sun.dawn;
+  }else{
+    nightEnd=(sun2&&isFinite(sun2.dawn.getTime()))?sun2.dawn:new Date(nightStart.getTime()+12*3600000);
+  }
+  var L=nightEnd-nightStart; // 夜长：天黑 → 天亮
   for(var k=1;k<=5;k++){
     if(state.gengEn['geng'+k]===false) continue;
-    var gtime=new Date(sun.dusk.getTime()+L*(k-1)/5);
+    var gtime=new Date(nightStart.getTime()+L*(k-1)/5);
     evs.push({id:'geng'+k, time:gtime, name:GENG_NAMES[k-1],
       note:k===1?'天黑起更':(k===5?'五更尽则天亮':'夜')});
     if(state.watchPoint){
@@ -787,7 +815,14 @@ function computeEvents(){
       }
     }
   }
-  /* —— 后台自定义报时 —— */
+  /* —— 次日黎明报时：换日点设在天亮后 5 分钟（必然早于日出），晨钟/开市由换日后的
+     当日清单播出，无需次日副本；唯报晓（天亮前 40 分钟）须赶在换日前播出，需提前排入 —— */
+  if(sun2&&isFinite(sun2.dawn.getTime())){
+    if(state.evEn.baoxiao!==false) evs.push({id:'baoxiao_next', time:new Date(sun2.dawn.getTime()-40*60000),
+      name:'交五更 · 报晓', note:'（次日）寺僧打木鱼铁牌，循门报晓'});
+  }
+  /* —— 后台自定义报时（今日 + 次日：固定时刻/太阳时刻均按各自基准日计算，
+     否则换日点之后才轮到的次日凌晨报时会落空） —— */
   (state.customEvents||[]).forEach(function(ce){
     if(ce.en===false) return;
     var t=null;
@@ -795,14 +830,48 @@ function computeEvents(){
     if(!t||isNaN(t.getTime())) return;
     evs.push({id:ce.id, time:t, name:ce.name||'报时', note:timeNote(ce), custom:true});
   });
+  if(sun2&&isFinite(sun2.dawn.getTime())){
+    (state.customEvents||[]).forEach(function(ce){
+      if(ce.en===false) return;
+      var t=null;
+      try{ t=customTime(ce, sun2, 1); }catch(e){ return; } // 固定时刻按次日推算，太阳时刻按次日日出入
+      if(!t||isNaN(t.getTime())) return;
+      evs.push({id:ce.id+'_next', time:t, name:ce.name||'报时', note:'（次日）'+timeNote(ce), custom:true});
+    });
+  }
   evs.sort(function(a,b){ return a.time-b.time; });
   return evs;
 }
-function customTime(ce){
-  var sun=state.sun;
+/* 换日点：次日天亮后再留 5 分钟缓冲——此时本夜更声与天亮报晓已报毕，
+   且远早于日出晨钟（日出至少在天亮后 20 分钟以上），换日不影响任何钟声。
+   自定义报时若贴近换日点则顺延，但不越过次日天黑（次日更声开始前）。 */
+function computeCycleEnd(){
+  var now=simNow(), sun=state.sun;
+  if(!sun) return new Date(now.getTime()+24*3600000);
+  var t2=null, end=null, dusk2=0;
+  try{ t2=SunCalc.getTimes(new Date(now.getTime()+86400000),state.lat,state.lng); }catch(e){}
+  if(t2&&isFinite(t2.dawn.getTime())){
+    end=new Date(t2.dawn.getTime()+5*60000);
+    dusk2=(isFinite(t2.dusk.getTime())?t2.dusk.getTime():end.getTime()+12*3600000);
+  }else{
+    end=new Date(now.getTime()+24*3600000);
+    dusk2=end.getTime()+12*3600000;
+  }
+  var base=end.getTime(), latest=0;
+  eventsToday.forEach(function(ev){
+    if(!ev.custom) return;
+    var t=ev.time.getTime();
+    if(t>=base-120000&&t<=base) latest=Math.max(latest,t); // 仅基准换日点前 2 分钟内的自定义报时顺延，防重报
+  });
+  if(latest) end=new Date(latest+5*60000);
+  if(end.getTime()>dusk2-2*60000) end=new Date(dusk2-2*60000);
+  return end;
+}
+function customTime(ce, sunOverride, dayOff){
+  var sun=sunOverride||state.sun;
   if(ce.timeType==='fixed'){
     var p=(ce.hh||'21:00').split(':');
-    return atTime(parseInt(p[0])||0, parseInt(p[1])||0, 0);
+    return atTime(parseInt(p[0])||0, parseInt(p[1])||0, dayOff||0);
   }
   var base=null;
   if(ce.timeType==='dawn') base=sun.dawn;
@@ -823,16 +892,19 @@ function timeNote(ce){
 /* =====================================================================
  * 六、调度器
  * ===================================================================*/
-var eventsToday=[], playedSet=new Set(), lastKey='', playingEv=null, bannerTimer=null;
+var eventsToday=[], playedSet=new Set(), cycleEnd=0, playingEv=null, bannerTimer=null;
+/* 声音测试（后台）：以倍速模拟未来 24 小时的时间流速；testOffset 为模拟时钟相对真实时钟的偏移 */
+var TESTING=false, testSpeed=60, testOffset=0, lastRealT=0, testTimer=null, testStartedT=0;
+function simNow(){ return new Date(Date.now()+testOffset); }
 function rebuildEvents(){
   eventsToday=computeEvents();
   playedSet=new Set();
-  lastKey=new Date().toDateString();
+  cycleEnd=computeCycleEnd();
   renderSun(); renderEvents();
 }
 function tick(){
-  var now=new Date();
-  if(now.toDateString()!==lastKey) rebuildEvents();
+  var now=simNow();
+  if(cycleEnd&&now.getTime()>=cycleEnd.getTime()) rebuildEvents();
   var next=null, skipped=false;
   for(var i=0;i<eventsToday.length;i++){
     var ev=eventsToday[i];
@@ -843,7 +915,7 @@ function tick(){
     if(!next||ev.time<next.time) next=ev;
   }
   if(skipped) renderEvents();
-  if(state.auto&&!playingEv&&next){
+  if((state.auto||TESTING)&&(!playingEv||TESTING)&&next){
     var diff=now.getTime()-next.time.getTime();
     if(diff>=-500&&diff<120000){
       playedSet.add(next.id);
@@ -852,7 +924,7 @@ function tick(){
   }
   updateClock(now,next);
 }
-setInterval(tick,1000);
+var realTimer=setInterval(tick,1000);
 
 async function playEvent(ev){
   playingEv=ev.id;
@@ -909,11 +981,11 @@ function renderSun(){
 function makeEvRow(ev, withToggle, compact){
   var row=document.createElement('div');
   row.className='evrow'+(compact?' evrow-pt':'');
-  var now=new Date();
+  var now=simNow();
   var isPlayed=playedSet.has(ev.id), isPast=ev.time<now;
   if(isPlayed||isPast) row.classList.add('played');
   if(playingEv===ev.id){ row.classList.remove('played'); row.classList.add('live'); }
-  var seq=getSeq(ev.id), over=!!state.overrides[ev.id];
+  var seq=getSeq(ev.id), over=!!state.overrides[ev.id.replace(/_next$/,'')];
   var timeTxt=fmtHM(ev.time)+(ev.time.getDate()!==now.getDate()?'*':'');
   var toggleBtn=withToggle?'<button class="btn ghost sm b-toggle" title="展开此更五点">▸</button>':'';
   row.innerHTML=
@@ -930,10 +1002,12 @@ function renderEvents(){
   var box=$('evList'); box.innerHTML='';
   var dayIds=['baoxiao','dawn','market','noon','sunset'];
   var dayEvs=[], nightEvs=[];
-  var sun=state.sun;
+  var sun=state.sun, sun2=state.sun2;
   eventsToday.forEach(function(ev){
+    if(ev.id.indexOf('_next')>=0) return; // 次日报时条目仅用于触发，不在列表重复显示
     if(dayIds.indexOf(ev.id)>=0) dayEvs.push(ev);
-    else if(ev.custom&&sun&&ev.time>=sun.dawn&&ev.time<sun.dusk) dayEvs.push(ev); // 白昼时段的自定义报时归入白昼
+    else if(ev.custom&&sun&&((ev.time>=sun.dawn&&ev.time<sun.dusk)||
+      (sun2&&ev.time>=sun2.dawn&&ev.time<sun2.dusk))) dayEvs.push(ev); // 白昼（含次日白昼）的自定义报时归入白昼
     else nightEvs.push(ev);
   });
   if(!dayEvs.length&&!nightEvs.length){ box.innerHTML='<div style="color:var(--ink2)">正在排定…</div>'; return; }
@@ -1000,7 +1074,7 @@ function renderBoard(){
 function log(msg){
   var box=$('log');
   var d=document.createElement('div');
-  d.innerHTML='<b>'+fmtHMS(new Date())+'</b> '+msg;
+  d.innerHTML='<b>'+fmtHMS(simNow())+'</b> '+msg;
   box.insertBefore(d,box.firstChild);
   while(box.children.length>20) box.removeChild(box.lastChild);
 }
@@ -1044,7 +1118,7 @@ function openReplace(id){
   $('dlgReplace').showModal();
 }
 function openEdit(evId,name){
-  dlgEditEv=evId;
+  dlgEditEv=evId.replace(/_next$/,''); // 次日报时条目与当日条目共用同一序列与开关
   $('editTitle').textContent='编辑报时序列：'+name;
   var body=$('editBody'); body.innerHTML='';
   var seq=getSeq(evId);
@@ -1204,6 +1278,41 @@ $('aWatchPoint').addEventListener('change',function(){ state.watchPoint=this.che
 $('aBaoxiao').addEventListener('change',function(){ state.evEn.baoxiao=this.checked; saveState(); rebuildEvents(); renderAdminEvents(); });
 $('aMarket').addEventListener('change',function(){ state.evEn.market=this.checked; saveState(); rebuildEvents(); renderAdminEvents(); });
 $('aNoon').addEventListener('change',function(){ state.evEn.noon=this.checked; saveState(); rebuildEvents(); renderAdminEvents(); });
+/* —— 声音测试：多倍速模拟未来 24 小时 —— */
+function startTest(){
+  if(TESTING) return;
+  TESTING=true;
+  testSpeed=parseInt($('tSpeed').value)||60;
+  testOffset=0; lastRealT=Date.now(); testStartedT=Date.now();
+  rebuildEvents();
+  clearInterval(realTimer);
+  testTimer=setInterval(testTick,100);
+  $('btnTestStart').disabled=true; $('btnTestStop').disabled=false;
+  $('tStatus').textContent='模拟中…';
+  log('【模拟测试】开始：'+testSpeed+' 倍速，快进未来 24 小时');
+}
+function testTick(){
+  var n=Date.now();
+  testOffset+=(n-lastRealT)*testSpeed;
+  lastRealT=n;
+  tick();
+  var el=Date.now()+testOffset-testStartedT;
+  $('tStatus').textContent='模拟时刻 '+fmtHMS(simNow())+' ｜ 已模拟 '+Math.floor(el/3600000)+' 时 '+pad(Math.floor((el%3600000)/60000))+' 分';
+  if(el>=86400000) stopTest(true);
+}
+function stopTest(done){
+  if(!TESTING) return;
+  TESTING=false;
+  clearInterval(testTimer); testTimer=null;
+  realTimer=setInterval(tick,1000);
+  testOffset=0;
+  rebuildEvents();
+  $('btnTestStart').disabled=false; $('btnTestStop').disabled=true;
+  $('tStatus').textContent='';
+  log('【模拟测试】'+(done?'完成：24 小时已模拟完毕':'已手动停止')+'，恢复正常计时');
+}
+$('btnTestStart').addEventListener('click',startTest);
+$('btnTestStop').addEventListener('click',function(){ stopTest(false); });
 $('aGengSound').addEventListener('change',function(){ state.gengSound=this.value; saveState(); rebuildEvents(); renderAdminEvents(); });
 $('aPointSound').addEventListener('change',function(){ state.pointSound=this.value; saveState(); rebuildEvents(); renderAdminEvents(); });
 
@@ -1291,8 +1400,9 @@ $('snSave').addEventListener('click',function(){
 /* —— 后台：报时管理 —— */
 function adminEvRow(ev,isGeng){
   var row=document.createElement('div'); row.className='evrow';
-  var en=isGeng?(state.gengEn[ev.id]!==false):(state.evEn[ev.id]!==false);
-  var over=!!state.overrides[ev.id];
+  var base=ev.id.replace(/_next$/,'');
+  var en=isGeng?(state.gengEn[ev.id]!==false):(state.evEn[base]!==false);
+  var over=!!state.overrides[base];
   row.innerHTML=
     '<input type="checkbox" class="a-en" '+(en?'checked':'')+'>'+
     '<span class="evtime">'+fmtHM(ev.time)+'</span>'+
@@ -1300,7 +1410,7 @@ function adminEvRow(ev,isGeng){
     '<span class="evseq">'+seqLabel(getSeq(ev.id))+'</span>'+
     '<span class="evbtns"><button class="btn ghost sm b-aseq">编辑序列</button></span>';
   row.querySelector('.a-en').addEventListener('change',function(){
-    if(isGeng) state.gengEn[ev.id]=this.checked; else state.evEn[ev.id]=this.checked;
+    if(isGeng) state.gengEn[ev.id]=this.checked; else state.evEn[ev.id.replace(/_next$/,'')]=this.checked;
     saveState(); rebuildEvents(); renderAdminEvents();
   });
   row.querySelector('.b-aseq').addEventListener('click',function(){ openEdit(ev.id,ev.name); });
@@ -1343,6 +1453,7 @@ function renderAdminEvents(){
   var head=function(t){ var d=document.createElement('div'); d.className='evsec'; d.textContent=t; return d; };
   box.appendChild(head('白昼 · 晨钟暮鼓'));
   eventsToday.forEach(function(ev){
+    if(ev.id.indexOf('_next')>=0) return; // 次日报时条目不重复显示
     if(dayIds.indexOf(ev.id)>=0) box.appendChild(adminEvRow(ev,false));
   });
   box.appendChild(head('夜 · 五更（天黑起更 · 天亮止更）'));
