@@ -151,7 +151,6 @@ footer{max-width:980px;margin:24px auto 0;padding:14px 18px;font-size:.85rem;col
     </div>
     <div class="statusline" id="statusEl">正在排定今日钟鼓…</div>
     <div class="nextline">下次报时：<b id="nextEl">--</b></div>
-    <div class="hint" id="audioHint" style="display:none">※ 请点击页面任意处以开启声音</div>
   </header>
 
   <!-- ① 方位 -->
@@ -463,7 +462,7 @@ function esc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,
 var actx=null, bus=null, liveAudios=new Set();
 function ensureCtx(){
   if(!actx){ var AC=window.AudioContext||window.webkitAudioContext; if(!AC) return null; actx=new AC(); }
-  if(actx.state==='suspended') actx.resume();
+  if(actx.state==='suspended'){ var p=actx.resume(); if(p&&p.catch) p.catch(function(){}); }
   return actx;
 }
 function getBus(){
@@ -1227,7 +1226,6 @@ $('stopBtn').addEventListener('click',stopAll);
 $('autoOn').addEventListener('change',function(){
   state.auto=this.checked; saveState();
   if(state.auto){ var ctx=ensureCtx(); if(!ctx) alert('此浏览器不支持 Web Audio，无法发声'); }
-  $('audioHint').style.display='none';
 });
 
 /* =====================================================================
@@ -1603,13 +1601,20 @@ $('masterVol').addEventListener('input',function(){
   $('volPct').textContent=this.value+'%';
 });
 
-/* 首次交互时开启音频（浏览器自动播放策略） */
-var audioStarted=false;
-document.addEventListener('pointerdown',function once(){
+/* 打开页面即尝试开启声音：浏览器自动播放策略可能将音频暂置为“挂起”，
+   故定时自动重试恢复，无需点击页面；若个别浏览器仍拦截，
+   首次任意点击/按键后也会静默恢复，不弹任何提示 */
+var audioKeepAlive=null;
+function startAudioKeepAlive(){
   ensureCtx();
-  $('audioHint').style.display='none';
-  if(state.auto&&!audioStarted){ audioStarted=true; log('自动报时已就绪，声音已开启'); }
-},{once:true});
+  if(audioKeepAlive) return;
+  audioKeepAlive=setInterval(function(){
+    var ctx=ensureCtx();
+    if(!ctx||ctx.state==='running'){ clearInterval(audioKeepAlive); audioKeepAlive=null; }
+  },2000);
+}
+document.addEventListener('pointerdown',function(){ ensureCtx(); });
+document.addEventListener('keydown',function(){ ensureCtx(); });
 
 /* 全局错误捕获（写入记录区，便于排查） */
 window.addEventListener('error',function(ev){
@@ -1626,10 +1631,10 @@ function init(){
   $('autoOn').checked=!!state.auto;
   $('masterVol').value=Math.round(state.masterVol*100);
   $('volPct').textContent=Math.round(state.masterVol*100)+'%';
-  if(state.auto) $('audioHint').style.display='block';
   rebuildEvents();
   seedDefaultAudio().then(function(){ loadReplacements(); });
   route();
+  startAudioKeepAlive(); /* 打开页面即开启声音（无需点击） */
   tick();
 }
 init();
