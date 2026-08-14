@@ -1,12 +1,21 @@
 # 北宋报时 · 晨钟暮鼓 · 五更梆子
 
-> 北宋京城报时模拟 —— 按当地日出日落，自动排定钟鼓梆声的安卓应用
+> 以乐司时，按时而眠 —— 按当地日出日落，自动排定钟鼓梆声的安卓应用
 
 [![Android](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android)](https://developer.android.com/)
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.24-7F52FF?logo=kotlin)](https://kotlinlang.org/)
 [![minSdk](https://img.shields.io/badge/minSdk-26-brightgreen)](https://developer.android.com/studio/releases/platforms)
 [![targetSdk](https://img.shields.io/badge/targetSdk-34-blue)](https://developer.android.com/studio/releases/platforms)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](#license)
+
+## 为什么做这个
+
+> 古之「樂」與「藥」本為一字之變——繁體字里，樂字添上一叢草，便是藥。古人早已明白：**音樂是治心的藥**。
+> 鐘鼓司時、五更報更，晨鐘催醒、暮鼓安神，人循著天地節律起居作息，身心自然安頓。
+>
+> 這個應用想做的，就是把被現代人遺忘的這套「以樂司時、按時而眠」的古代睡眠制度，重新裝進手機：
+> **太陽在哪，聲音就在哪**——日出晨鐘喚醒，日落暮鼓入夜，夜裡五更梆聲報更，讓一天與日月同步。
+> 現代人的失眠與紊亂，往往始於與天時的脫節；願鐘鼓之聲，能如古時良藥，助你找回安穩的睡眠，調養身心。
 
 夜自天黑起更，至天亮五更止；日出敲钟、日中敲钟、日落击鼓；交五更时诸寺院行者打木鱼铁牌，循门报晓 —— 本应用把《东京梦华录》里记载的北宋京城报时制度，装进你的手机。
 
